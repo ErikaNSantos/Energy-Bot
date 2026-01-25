@@ -1,6 +1,8 @@
 # ⚡ Residential Energy Monitoring Bot
 
-A Telegram personal assistant designed to track, calculate, and predict residential electrical energy consumption in real-time. This project replaces manual spreadsheets with an event-based "Start/Stop" system, persisting data in SQLite and applying engineering rules to estimate the final monthly invoice.## 🤖 The "Housemates" (Monitored Hardware)
+A Telegram personal assistant designed to track, calculate, and predict residential electrical energy consumption in real-time. This project replaces manual spreadsheets with an event-based "Start/Stop" system, persisting data in SQLite and applying engineering rules to estimate the final monthly invoice.
+
+## 🤖 The "Housemates" (Monitored Hardware)
 
 The bot was customized for the specific hardware of the residence, affectionately nicknamed by the users:
 
