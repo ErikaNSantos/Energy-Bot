@@ -2,7 +2,7 @@ import telebot
 import sqlite3
 import os
 import json
-from datetime import datetime
+from datetime import datetime,timezone
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 
@@ -191,7 +191,7 @@ def executar_desligamento(call):
     
     if sessao:
         inicio = datetime.strptime(sessao[0], '%Y-%m-%d %H:%M:%S')
-        fim = datetime.now()
+        fim = datetime.now(timezone.utc).replace(tzinfo=None)
         duracao_segundos = (fim - inicio).total_seconds()
         duracao_minutos = duracao_segundos / 60
         
