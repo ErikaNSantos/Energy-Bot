@@ -105,7 +105,7 @@ def processar(c):
     conn.commit()
     conn.close()
     bot.edit_message_text(msg, c.message.chat.id, c.message.message_id)
-
+    
 
 # --- DESLIGAR ---
 @bot.message_handler(func=lambda m: m.text == "🔴 Desligar Algo")
