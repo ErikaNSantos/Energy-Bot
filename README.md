@@ -1,83 +1,150 @@
 # ⚡ Residential Energy Monitoring Bot
 
-A Telegram bot that tracks, calculates, and projects residential electricity consumption in real time. It replaces manual spreadsheets with an event-based Start/Stop system, persists data in SQLite, and applies appliance-specific engineering rules to estimate the monthly invoice.
+A residential energy monitoring system developed to replace manual spreadsheets and fragmented consumption estimates with a structured, event-driven tracking model.
 
-## Architecture
+The project records appliance usage in real time, persists operational history in SQLite, and applies equipment-specific consumption models to estimate electricity costs throughout the month. Rather than relying on static averages, the system treats each activation as an individual event, enabling more realistic projections and granular consumption analysis.
 
-The project separates pure calculation logic from the interface layer, so the energy math can be reused if the front end changes (e.g. a future mobile app).
+## Project Motivation
 
-```
+Estimating residential electricity costs is deceptively difficult. Most household appliances do not operate continuously, and some — particularly inverter-based air conditioners — exhibit highly variable power consumption depending on operating conditions.
+
+Traditional spreadsheets often reduce this complexity to fixed monthly estimates, sacrificing accuracy and making it difficult to identify the true sources of energy consumption.
+
+This project addresses that limitation by modeling appliance usage as discrete operating sessions. Every activation becomes a measurable event with a defined start, duration, consumption profile, and associated cost.
+
+## System Architecture
+
+The architecture deliberately separates business logic from interface concerns.
+
+All energy calculations are encapsulated within the core layer, allowing the computational model to remain independent from Telegram-specific implementations. This separation enables future migration to alternative interfaces without requiring modifications to the calculation engine.
+
+```text
 energy-bot/
 ├── core/
-│   └── energia.py        # pure energy math (no DB, no Telegram)
+│   └── energia.py        # Energy calculation engine
 ├── interface/
-│   └── telegram_bot.py   # Telegram handlers + watchdog thread
+│   └── telegram_bot.py   # Telegram interface and watchdog services
 ├── data/
-│   ├── config.json       # tariff, appliances, alert limits, base load
-│   └── logs.db           # SQLite (created by setup)
+│   ├── config.json       # Tariffs, appliances and operating parameters
+│   └── logs.db           # SQLite database
 ├── database_setup.py
 └── requirements.txt
 ```
 
-## Monitored hardware
+The result is a modular structure in which the energy model, persistence layer, and user interface evolve independently.
 
-| Nickname    | Appliance       | Model                      | Calculation logic                                  |
-| ----------- | --------------- | -------------------------- | -------------------------------------------------- |
-| ❄️ Artolfo  | Air Conditioner | Gree G-Top (Inverter)      | Power per set point (non-linear, ACEEE rule)       |
-| 🚿 Shauna   | Electric Shower | Lorenzetti Advanced Quadra | Fixed power per selector position × time           |
-| 🧺 Morrisse | Washing Machine | Electrolux LES11 (11kg)    | Fixed cost per cycle (INMETRO label, motor energy) |
-| 🌀 Versares | Fan             | Ultra 30cm                 | Nominal power × time                               |
+## Consumption Models
 
-Base load (refrigerator + standby) is modeled separately as a continuous draw, since it runs 24/7 regardless of sessions.
+Different appliances require different approaches to consumption estimation.
 
-## Features
+| Appliance       | Model                      | Methodology                                                        |
+| --------------- | -------------------------- | ------------------------------------------------------------------ |
+| Air Conditioner | Gree G-Top Inverter        | Non-linear power estimation based on set-point temperature         |
+| Electric Shower | Lorenzetti Advanced Quadra | Fixed power draw according to selector position and operating time |
+| Washing Machine | Electrolux LES11           | Consumption per complete cycle derived from INMETRO data           |
+| Fan             | Ultra 30 cm                | Nominal power multiplied by operating duration                     |
 
-- **Session tracking** — Start/Stop per appliance with elapsed-time energy calculation.
-- **Forgot-to-turn-off alerts** — a background watchdog thread monitors active sessions and warns the user when an appliance stays on past a configurable limit (e.g. shower over 20 min), even with no interaction.
-- **`/invoice`** — partial monthly bill: per-appliance breakdown, base load, full-month projection, and comparison against the previous month.
-- **`/grafico`** — bar chart of kWh per appliance for the current month.
-- **`/reset`** — clears orphaned active sessions (e.g. after a restart) without touching history.
-- **Configurable tariff** — kWh cost and tariff flags (Green/Yellow/Red) set in `config.json`, reflecting local utility rates (Coelba — Bahia, Brazil).
+A separate baseline consumption model accounts for loads that operate continuously, such as refrigerators and standby devices. This prevents always-on equipment from distorting appliance-level analyses while preserving realistic monthly projections.
 
-## Tech stack
+## Core Features
 
-- **Language:** Python 3.12
-- **Interface:** pyTelegramBotAPI (Telebot)
-- **Database:** SQLite3 (WAL mode for concurrent read/write between the bot and the watchdog thread)
-- **Charts:** matplotlib
-- **Config:** python-dotenv for the token
+### Session-Based Monitoring
 
-## How to run
+Appliances are activated through Start/Stop events. The system records operating duration and calculates consumption only for the period in which the equipment was effectively running.
 
-1. Install dependencies:
+### Autonomous Safety Monitoring
 
-   ```
-   pip install -r requirements.txt
-   ```
+A background watchdog process continuously monitors active sessions.
 
-2. Create the database:
+When an appliance exceeds a predefined operating threshold, the system automatically notifies the user, helping prevent situations such as forgotten showers, fans, or air conditioners remaining active for extended periods.
 
-   ```
-   python database_setup.py
-   ```
+### Monthly Cost Projection
 
-3. Create a `.env` file in the project root:
+The `/invoice` command provides:
 
-   ```
-   TELEGRAM_TOKEN=your_token_here
-   ```
+* Current accumulated consumption
+* Appliance-level breakdown
+* Baseline consumption estimate
+* End-of-month projection
+* Comparison with the previous billing cycle
 
-4. Run the bot:
+This transforms raw operational data into actionable information for decision-making.
 
-   ```
-   python interface/telegram_bot.py
-   ```
+### Consumption Visualization
 
-## Database structure
+The `/grafico` command generates graphical summaries of monthly energy distribution, facilitating identification of dominant consumption sources.
 
-- **sessoes_ativas** — current running timers (one row per active appliance per user). Includes `ja_alertado` so the watchdog does not repeat alerts.
-- **historico_uso** — definitive log with cost (BRL), consumption (kWh), and duration, written when an appliance is turned off or a cycle is registered.
+### Operational Recovery
 
-## Notes
+The `/reset` command resolves orphaned active sessions caused by interruptions or unexpected shutdowns without affecting historical records.
 
-Timestamps are stored in UTC (`CURRENT_TIMESTAMP`) and all duration math uses UTC to stay consistent. Base-load defaults assume a frost-free refrigerator (~35 kWh/month) plus ~20 W of standby; adjust in `config.json` against the appliance's INMETRO label.
+## Technology Stack
+
+* **Python 3.12**
+* **SQLite3**
+* **pyTelegramBotAPI**
+* **Matplotlib**
+* **python-dotenv**
+
+SQLite operates in WAL (Write-Ahead Logging) mode, allowing concurrent database access between Telegram handlers and background monitoring services while preserving consistency.
+
+## Execution
+
+### 1. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Initialize the database
+
+```bash
+python database_setup.py
+```
+
+### 3. Configure environment variables
+
+Create a `.env` file in the project root:
+
+```env
+TELEGRAM_TOKEN=your_token_here
+```
+
+### 4. Start the bot
+
+```bash
+python interface/telegram_bot.py
+```
+
+## Database Design
+
+The persistence layer is intentionally minimal.
+
+### `sessoes_ativas`
+
+Stores currently running appliance sessions.
+
+Each record contains the information required for real-time monitoring, including alert state tracking to prevent duplicate notifications.
+
+### `historico_uso`
+
+Stores finalized operational events.
+
+Each record contains:
+
+* Duration
+* Consumption (kWh)
+* Monetary cost (BRL)
+* Appliance information
+* Timestamp metadata
+
+This table serves as the definitive source for historical analysis and billing projections.
+
+## Engineering Considerations
+
+All timestamps are stored in UTC to eliminate ambiguity in duration calculations and maintain consistency across system operations.
+
+Default baseline consumption assumptions are derived from typical frost-free refrigerator demand and residential standby loads. These values can be adjusted through `config.json` to reflect local conditions or appliance-specific INMETRO specifications.
+
+By combining event-driven monitoring, persistent operational history, and appliance-specific consumption models, the project transforms household electricity usage from a rough estimate into a measurable and continuously auditable system.
+
