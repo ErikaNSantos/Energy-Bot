@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import io
+import re
 import threading
 import time
 import calendar
@@ -16,7 +17,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from core import energia
+from core import energia, relatorio
 
 print("Iniciando bot do Telegram...")
 
@@ -105,7 +106,7 @@ def processar(c):
     conn.commit()
     conn.close()
     bot.edit_message_text(msg, c.message.chat.id, c.message.message_id)
-    
+
 
 # --- DESLIGAR ---
 @bot.message_handler(func=lambda m: m.text == "🔴 Desligar Algo")
@@ -176,56 +177,58 @@ def reset(m):
 
 
 # --- RELATÓRIO ---
+# handlers separados: empilhar dois decoradores na mesma função não registra
+# de forma confiável no telebot. O de texto usa startswith pra também pegar o
+# teclado antigo ("📊 Relatório (/invoice)") que fica em cache no cliente.
 @bot.message_handler(commands=['invoice'])
-@bot.message_handler(func=lambda m: m.text == "📊 Relatório")
-def invoice(m):
-    uid = m.from_user.id
-    conn = conectar()
-    cur = conn.cursor()
+def cmd_invoice(m):
+    partes = m.text.split()
+    periodo = partes[1] if len(partes) > 1 else None
+    enviar_invoice(m, periodo)
 
-    cur.execute("""SELECT aparelho_nome, SUM(consumo_kwh_estimado)
-                   FROM historico_uso
-                   WHERE user_id = ? AND strftime('%Y-%m', timestamp) = strftime('%Y-%m', 'now')
-                   GROUP BY aparelho_nome""", (uid,))
-    dados = cur.fetchall()
 
-    cur.execute("""SELECT SUM(consumo_kwh_estimado)
-                   FROM historico_uso
-                   WHERE user_id = ? AND strftime('%Y-%m', timestamp) = strftime('%Y-%m', 'now', '-1 month')""",
-                (uid,))
-    kwh_anterior = cur.fetchone()[0] or 0
-    conn.close()
+@bot.message_handler(func=lambda m: m.text and m.text.startswith("📊 Relat"))
+def btn_invoice(m):
+    enviar_invoice(m, None)
 
-    agora = datetime.now(timezone.utc)
-    dias_mes = calendar.monthrange(agora.year, agora.month)[1]
 
-    cb = CFG['carga_basal']
-    basal_h = energia.basal_kwh_hora(cb['geladeira_kwh_mes'], cb['outros_w'], dias_mes)
-    basal_kwh = basal_h * energia.horas_decorridas_mes(agora)
+def enviar_invoice(m, periodo):
+    if periodo and not re.match(r'^\d{4}-\d{2}$', periodo):
+        bot.reply_to(m, "Formato: /invoice AAAA-MM  (ex: /invoice 2026-03)")
+        return
+    if not periodo:
+        periodo = datetime.now(timezone.utc).strftime('%Y-%m')
 
-    kwh_aparelhos = sum(k for _, k in dados)
-    kwh_total = kwh_aparelhos + basal_kwh
-    custo_total = energia.custo(kwh_total, TARIFA)
+    r = relatorio.resumo_mensal(DB, m.from_user.id, periodo, CFG)
 
-    linhas = ["🧾 *Fatura parcial do mês*", ""]
-    for nome, kwh in dados:
-        linhas.append(f"{rotulo(nome)}: {kwh:.2f} kWh · R$ {energia.custo(kwh, TARIFA):.2f}")
-    linhas.append(f"🧊 Carga basal: {basal_kwh:.2f} kWh · R$ {energia.custo(basal_kwh, TARIFA):.2f}")
+    if not r['aparelhos'] and r['kwh_aparelhos'] == 0:
+        bot.reply_to(m, f"Sem registros de aparelhos em {periodo}. 🍃")
+        return
+
+    titulo = "🧾 *Fatura parcial do mês*" if r['eh_corrente'] else f"🧾 *Fatura de {periodo}*"
+    linhas = [titulo, ""]
+    for nome, kwh in r['aparelhos']:
+        linhas.append(f"{rotulo(nome)}: {kwh:.2f} kWh · R$ {energia.custo(kwh, r['tarifa']):.2f}")
+    linhas.append(f"🧊 Carga basal: {r['basal_kwh']:.2f} kWh · R$ {energia.custo(r['basal_kwh'], r['tarifa']):.2f}")
     linhas.append("")
-    linhas.append(f"Subtotal: {kwh_total:.2f} kWh · *R$ {custo_total:.2f}*")
+    linhas.append(f"Energia: {r['kwh_total']:.2f} kWh · R$ {r['custo_energia']:.2f}")
+    if r['cip']:
+        linhas.append(f"💡 Iluminação pública: R$ {r['cip']:.2f}")
+    linhas.append(f"💰 *Total: R$ {r['custo_total']:.2f}*")
 
-    proj_total = energia.projecao_mes(kwh_total, agora)
-    linhas.append(f"📈 Projeção do mês: {proj_total:.1f} kWh · *R$ {energia.custo(proj_total, TARIFA):.2f}*")
+    if r['eh_corrente']:
+        linhas.append(f"📈 Projeção do mês: {r['proj_kwh']:.1f} kWh · *R$ {r['proj_custo']:.2f}*")
+        base_comp = r['proj_aparelhos']
+    else:
+        base_comp = r['kwh_aparelhos']
 
-    # comparação só do que ela controla (aparelhos), basal é ~constante
-    if kwh_anterior > 0:
-        proj_aparelhos = energia.projecao_mes(kwh_aparelhos, agora)
-        var = (proj_aparelhos - kwh_anterior) / kwh_anterior * 100
+    if r['kwh_anterior'] > 0:
+        var = (base_comp - r['kwh_anterior']) / r['kwh_anterior'] * 100
         seta = "🔺" if var > 0 else "🔻"
-        linhas.append(f"{seta} {abs(var):.0f}% vs mês anterior ({kwh_anterior:.1f} kWh em aparelhos)")
+        linhas.append(f"{seta} {abs(var):.0f}% vs {r['mes_anterior']} ({r['kwh_anterior']:.1f} kWh em aparelhos)")
 
     linhas.append("")
-    linhas.append(f"_Tarifa aplicada: R$ {TARIFA:.2f}/kWh_")
+    linhas.append(f"_Tarifa: R$ {r['tarifa']:.2f}/kWh_")
     bot.reply_to(m, "\n".join(linhas), parse_mode="Markdown")
 
 
