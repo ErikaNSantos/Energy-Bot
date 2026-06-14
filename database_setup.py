@@ -1,37 +1,40 @@
 import sqlite3
 import os
 
+
 def criar_banco_dados():
-    # Define o caminho AUTOMATICAMENTE: Pasta do projeto / data / logs.db
-    caminho_pasta = os.path.join(os.getcwd(), 'data')
+    caminho_pasta = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
     caminho_banco = os.path.join(caminho_pasta, 'logs.db')
 
     if not os.path.exists(caminho_pasta):
         os.makedirs(caminho_pasta)
 
-    print(f"Conectando ao banco em: {caminho_banco}")
-
     conexao = sqlite3.connect(caminho_banco)
     cursor = conexao.cursor()
 
-    #Guarda quem ligou, o que ligou e quando, além de garantir que a tabela existe e que não há duplicatas
+    # WAL permite leitura concorrente com escrita: a thread de vigia e os
+    # handlers do bot acessam o banco ao mesmo tempo sem travar um ao outro
+    cursor.execute("PRAGMA journal_mode=WAL")
+
+    # ja_alertado: marca se o aviso de "esqueceu de desligar" já foi enviado,
+    # pra não repetir o alerta a cada ciclo da vigia
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sessoes_ativas (
         user_id INTEGER,
         aparelho_nome TEXT,
-        detalhe TEXT, -- Aqui guardamos a potência (Ex: "Frio|750")
+        detalhe TEXT,
         timestamp_inicio DATETIME DEFAULT CURRENT_TIMESTAMP,
+        ja_alertado INTEGER DEFAULT 0,
         PRIMARY KEY (user_id, aparelho_nome)
-                   )
+        )
     ''')
 
-    #Agora cria a tabela que guarda quem desligou o que e quando
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS historico_uso (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
         aparelho_nome TEXT,
-        detalhe TEXT,  -- Ex: "Gear 3|50" ou "Pesado"
+        detalhe TEXT,
         consumo_kwh_estimado REAL,
         duracao_minutos REAL,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -40,7 +43,8 @@ def criar_banco_dados():
 
     conexao.commit()
     conexao.close()
-    print(f"Banco de dados 'logs.db' criado com sucesso em: {os.path.join(os.path.expanduser('~'), 'Documentos', 'Projetos_Python', 'projeto_energia', 'data')}")
+    print(f"Banco criado em: {caminho_banco}")
+
 
 if __name__ == "__main__":
-    criar_banco_dados()        
+    criar_banco_dados()

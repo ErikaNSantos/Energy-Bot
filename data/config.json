@@ -2,5 +2,60 @@
     "tarifa_base": 0.92,
     "adicional_bandeira": 0.0,
     "unidade_federativa": "BA",
-    "concessionaria": "Coelba"
+    "concessionaria": "Coelba",
+    "carga_basal": {
+        "geladeira_kwh_mes": 35,
+        "outros_w": 20
+    },
+    "aparelhos": {
+        "Chuveiro": {
+            "apelido": "Shauna",
+            "emoji": "\ud83d\udebf",
+            "tipo": "sessao",
+            "limite_alerta_min": 20,
+            "potencias": {
+                "Desligado": 0,
+                "\u26ab": 2500,
+                "\u26ab\u26ab": 5500,
+                "\u26ab\u26ab\u26ab": 7500
+            }
+        },
+        "Ar Condicionado": {
+            "apelido": "Artolfo",
+            "emoji": "\u2744\ufe0f",
+            "tipo": "sessao",
+            "limite_alerta_min": 180,
+            "potencias": {
+                "Congelando (17\u00b0C a 20\u00b0C)": 900,
+                "Frio (21\u00b0C a 24\u00b0C)": 750,
+                "Usual (26\u00b0C)": 580
+            }
+        },
+        "Ventilador": {
+            "apelido": "Versares",
+            "emoji": "\ud83c\udf00",
+            "tipo": "sessao",
+            "limite_alerta_min": 240,
+            "potencias": {
+                "Gear 0": 0,
+                "Gear 1": 35,
+                "Gear 2": 42,
+                "Gear 3": 50
+            }
+        },
+        "M\u00e1quina de Lavar": {
+            "apelido": "Morrisse",
+            "emoji": "\ud83e\uddfa",
+            "tipo": "ciclo",
+            "potencias": {
+                "Delicado/Esporte": 0.25,
+                "R\u00e1pido": 0.15,
+                "Normal": 0.34,
+                "Escuras/Coloridas": 0.34,
+                "Brancas": 0.34,
+                "Pesadas": 0.45,
+                "Centrifuga\u00e7\u00e3o": 0.10
+            }
+        }
+    }
 }

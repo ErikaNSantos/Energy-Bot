@@ -1,65 +1,83 @@
 # ⚡ Residential Energy Monitoring Bot
 
-A Telegram personal assistant designed to track, calculate, and predict residential electrical energy consumption in real-time. This project replaces manual spreadsheets with an event-based "Start/Stop" system, persisting data in SQLite and applying engineering rules to estimate the final monthly invoice.
+A Telegram bot that tracks, calculates, and projects residential electricity consumption in real time. It replaces manual spreadsheets with an event-based Start/Stop system, persists data in SQLite, and applies appliance-specific engineering rules to estimate the monthly invoice.
 
-## 🤖 The "Housemates" (Monitored Hardware)
+## Architecture
 
-The bot was customized for the specific hardware of the residence, affectionately nicknamed by the users:
+The project separates pure calculation logic from the interface layer, so the energy math can be reused if the front end changes (e.g. a future mobile app).
 
-| Nickname | Appliance | Real Model | Calculation Logic |
-| :--- | :--- | :--- | :--- |
-| **❄️ Artolfo** | Air Conditioner | Gree G-Top Connection (Inverter) | Thermal Load Calculation (Set Point vs. Power Consumption) |
-| **🚿 Shauna** | Electric Shower | Lorenzetti Advanced Quadra | Fixed power per selector position (W) x Time |
-| **🧺 Morrisse** | Washing Machine | Electrolux LES11 (11kg) | Fixed cost per Cycle (Motor Energy - Passive Soaking) |
-| **🌀 Versares** | Fan | Ultra 30cm | Nominal power (50W) x Time |## 🧠 Data Engineering & Business Rules
+```
+energy-bot/
+├── core/
+│   └── energia.py        # pure energy math (no DB, no Telegram)
+├── interface/
+│   └── telegram_bot.py   # Telegram handlers + watchdog thread
+├── data/
+│   ├── config.json       # tariff, appliances, alert limits, base load
+│   └── logs.db           # SQLite (created by setup)
+├── database_setup.py
+└── requirements.txt
+```
 
-Unlike generic calculators, this project applies heuristics based on the appliances' technical datasheets:### 1. Air Conditioner (Inverter Logic)
+## Monitored hardware
 
-Based on the **ACEEE (American Council for an Energy-Efficient Economy)** rule.- Power consumption is non-linear.- **Applied Rule:** Estimated savings of ~7% for every 1°C (1.8°F) increase in the thermostat setting.- *Example:* "Eco Mode (26°C)" consumes ~580W, while "Freezing Mode (20°C)" peaks at 900W.### 2. Washing Machine (Top Load)
+| Nickname    | Appliance       | Model                      | Calculation logic                                  |
+| ----------- | --------------- | -------------------------- | -------------------------------------------------- |
+| ❄️ Artolfo  | Air Conditioner | Gree G-Top (Inverter)      | Power per set point (non-linear, ACEEE rule)       |
+| 🚿 Shauna   | Electric Shower | Lorenzetti Advanced Quadra | Fixed power per selector position × time           |
+| 🧺 Morrisse | Washing Machine | Electrolux LES11 (11kg)    | Fixed cost per cycle (INMETRO label, motor energy) |
+| 🌀 Versares | Fan             | Ultra 30cm                 | Nominal power × time                               |
 
-Based on the **INMETRO label (0.34 kWh/cycle)**.- The code ignores the total washing duration (which includes passive soaking with zero consumption).- Cost is calculated based on **Motor Activity**: Quick cycles or "Spin Only" modes cost a fraction of the full cycle, regardless of the total duration.
+Base load (refrigerator + standby) is modeled separately as a continuous draw, since it runs 24/7 regardless of sessions.
 
-### 3. Dynamic Tariffs- System prepared for **Tariff Flags** (Green, Yellow, Red).- kWh cost is configurable via JSON to reflect local utility rates (Coelba - Bahia, Brazil).
+## Features
 
-## 🛠️ Tech Stack
+- **Session tracking** — Start/Stop per appliance with elapsed-time energy calculation.
+- **Forgot-to-turn-off alerts** — a background watchdog thread monitors active sessions and warns the user when an appliance stays on past a configurable limit (e.g. shower over 20 min), even with no interaction.
+- **`/invoice`** — partial monthly bill: per-appliance breakdown, base load, full-month projection, and comparison against the previous month.
+- **`/grafico`** — bar chart of kWh per appliance for the current month.
+- **`/reset`** — clears orphaned active sessions (e.g. after a restart) without touching history.
+- **Configurable tariff** — kWh cost and tariff flags (Green/Yellow/Red) set in `config.json`, reflecting local utility rates (Coelba — Bahia, Brazil).
+
+## Tech stack
+
 - **Language:** Python 3.12
-- **Interface:** [PyTelegramBotAPI](https://github.com/eternnoir/pyTelegramBotAPI) (Telebot)
-- **Database:** SQLite3 (Native, lightweight, and serverless)
-- **Security:** Python-dotenv (Environment variable management)
-- **Engineering:** Data modeling for time series (usage logs).
+- **Interface:** pyTelegramBotAPI (Telebot)
+- **Database:** SQLite3 (WAL mode for concurrent read/write between the bot and the watchdog thread)
+- **Charts:** matplotlib
+- **Config:** python-dotenv for the token
 
-## 🚀 How to Run the Project
-### Prerequisites
-- Python 3.8+
-- Telegram Account and a Token generated by @BotFather
+## How to run
 
-### Installation
+1. Install dependencies:
 
-1. Clone the repository:
-   ```bash
-   git clone [https://github.com/YOUR-USERNAME/energy-monitor-bot.git](https://github.com/YOUR-USERNAME/energy-monitor-bot.git)
-   cd energy-monitor-bot
    ```
-2. Install dependencies:
-   ```bash
    pip install -r requirements.txt
    ```
-3. Configure security
-* Create a `.env` file in the project root
-* Add your token: `TELEGRAM_TOKEN=your_token_here`
-  
-4. Run the bot
-   ```bash
+
+2. Create the database:
+
+   ```
+   python database_setup.py
+   ```
+
+3. Create a `.env` file in the project root:
+
+   ```
+   TELEGRAM_TOKEN=your_token_here
+   ```
+
+4. Run the bot:
+
+   ```
    python interface/telegram_bot.py
    ```
 
-## 🗃️ Database Structure
+## Database structure
 
-The system automatically creates a `logs.db` file with two main tables:
+- **sessoes_ativas** — current running timers (one row per active appliance per user). Includes `ja_alertado` so the watchdog does not repeat alerts.
+- **historico_uso** — definitive log with cost (BRL), consumption (kWh), and duration, written when an appliance is turned off or a cycle is registered.
 
-* **sessoes_ativas (active_sessions):** Stores the current state (Running Timer). Ensures that if the script restarts, the timer keeps running.
-* **historico_uso (usage_history):** Definitive log with cost (BRL), consumption (kWh), and duration, calculated after the appliance is turned off.
+## Notes
 
-## 📝 Status
-
-🚧 **Under Development:** Implementing monthly reports (`/invoice`) and consumption charts.
+Timestamps are stored in UTC (`CURRENT_TIMESTAMP`) and all duration math uses UTC to stay consistent. Base-load defaults assume a frost-free refrigerator (~35 kWh/month) plus ~20 W of standby; adjust in `config.json` against the appliance's INMETRO label.
